@@ -6,27 +6,34 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import requests
 import uvicorn
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
-from typing import Dict, Union, Optional
+from fastapi import FastAPI
+from pydantic import BaseModel
+from typing import Optional
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
-# Carrega as variáveis do arquivo .env
+# Carrega variáveis do .env
 load_dotenv()
 
-# Configuração de Logging
+# Logging
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
 app = FastAPI(title="Agente de IA THRIVE")
+
+# Rota principal — corrigida para usar o domínio real quando publicado
 @app.get("/")
 def root():
     return {
         "message": "API Thrive Business está online 🚀",
         "status": "running",
-        "docs": "http://127.0.0.1:8000/docs",
-        "health": "http://127.0.0.1:8000/api/health"
+        "docs": "/docs",
+        "health": "/api/health"
     }
+
+# Rota de health check — NECESSÁRIA no Render
+@app.get("/api/health")
+def health():
+    return {"status": "ok", "service": "Thrive Business API"}
 
 
 # --- CONFIGURAÇÃO (Lê do .env) ---
@@ -38,7 +45,7 @@ SMTP_SERVER = os.environ.get("SMTP_SERVER", "smtp.gmail.com")
 SMTP_PORT = int(os.environ.get("SMTP_PORT", 587))
 GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent"
 
-# Carrega o Prompt
+# Prompt
 SYSTEM_PROMPT = "Você é um Consultor Sênior."
 try:
     with open('Agente_IA_THRIVE_FINAL.txt', 'r', encoding='utf-8') as f:
@@ -46,10 +53,11 @@ try:
 except FileNotFoundError:
     logging.warning("Arquivo de prompt não encontrado. Usando padrão.")
 
-# Configuração CORS (Para o Blog funcionar)
+
+# CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Permite qualquer origem para facilitar o teste
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -130,7 +138,8 @@ def generate_report(analysis_data):
 
 
 def send_email(scores, analysis, report):
-    if not SENDER_PASSWORD: return
+    if not SENDER_PASSWORD:
+        return
 
     subject = f"LEAD THRIVE: {analysis['gargalo_critico']} | {scores.nome_cliente}"
     body = f"""
@@ -156,7 +165,7 @@ def send_email(scores, analysis, report):
         server.login(SENDER_EMAIL, SENDER_PASSWORD)
         server.send_message(msg)
         server.quit()
-        logging.info("E-mail de notificação enviado!")
+        logging.info("E-mail enviado!")
     except Exception as e:
         logging.error(f"Erro ao enviar email: {e}")
 
@@ -176,8 +185,7 @@ def diagnose(scores: MDMPScore):
     }
 
 
-# --- ESTA PARTE PERMITE RODAR NO PYCHARM ---
+# --- RODAR LOCAL OU NO RENDER ---
 if __name__ == "__main__":
     print("Iniciando Servidor THRIVE...")
-    # Roda o servidor na porta 8000
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
