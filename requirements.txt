@@ -1,3 +1,7 @@
-fastapiuvicornpydanticrequests
-Adicionado para a correção de CORS
-fastapi-cors
+fastapi
+uvicorn
+pydantic
+requests
+python-dotenv
+email-validator
+pydantic[email]

@@ -19,6 +19,15 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
 app = FastAPI(title="Agente de IA THRIVE")
+@app.get("/")
+def root():
+    return {
+        "message": "API Thrive Business está online 🚀",
+        "status": "running",
+        "docs": "http://127.0.0.1:8000/docs",
+        "health": "http://127.0.0.1:8000/api/health"
+    }
+
 
 # --- CONFIGURAÇÃO (Lê do .env) ---
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
