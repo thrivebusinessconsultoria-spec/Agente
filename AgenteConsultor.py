@@ -43,7 +43,7 @@ from fastapi.middleware.cors import CORSMiddleware
 # CORS - Configuração COMPLETA
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Em produção: ["https://seublog.com"]
+    allow_origins=["https://ecoestatus.blogspot.com/"],  # Em produção: ["https://seublog.com"]
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
@@ -217,4 +217,5 @@ def health():
 #     import uvicorn
 #     print("Iniciando Servidor THRIVE...")
 #     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
+
 
