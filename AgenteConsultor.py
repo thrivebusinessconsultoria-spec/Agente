@@ -26,7 +26,9 @@ if not RESEND_API_KEY:
     logging.warning("⚠️ RESEND_API_KEY não configurada. O envio de e-mails será ignorado.")
 
 RESEND_API_URL = "https://api.resend.com/emails"
+# Usando o nome completo do modelo conforme o contexto
 GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent"
+# Puxando do ambiente, com fallback
 WHATSAPP_NUMBER = os.environ.get("WHATSAPP_NUMBER", "5524992778145")
 
 app = FastAPI(title="Agente IA THRIVE - Consultor Sênior Consolidado")
@@ -83,19 +85,26 @@ PERSONAS = {
 }
 
 REGRAS_GATILHO = {
+    # Mapeamento de gatilhos pontuais (Resposta 1 = Nível mais baixo)
     "p1_q0": { 1: { "peso": 9, "msg": "⚠️ **Falta de Rumo:** Ausência de Missão clara deixa a equipa sem propósito." } },
     "p1_q1": { 1: { "peso": 8, "msg": "🔥 **Miopia Estratégica:** Planeamento de longo prazo inexistente ou na cabeça." } },
+    
     "p2_q1": { 1: { "peso": 10, "msg": "🚨 **Caixa Misturado:** Misturar contas PF/PJ é o erro nº 1 que leva à falência." } },
     "p2_q2": { 1: { "peso": 9, "msg": "📉 **Pró-labore Irregular:** Sem valor fixo, não há separação financeira real." } },
+    
     "p3_q0": { 1: { "peso": 9, "msg": "🔗 **Conhecimento Tribal:** Processos não documentados. A qualidade depende de quem executa." } },
+    
     "p4_q0": { 1: { "peso": 8, "msg": "📉 **Vendas por Sorte:** Sem Funil visual, a receita futura é imprevisível." } },
+    
     "p5_q1": { 1: { "peso": 8, "msg": "❌ **Contratação de Risco:** Seleção baseada em urgência, sem fit cultural ou teste de perfil." } },
+    
     "p6_q2": { 1: { "peso": 10, "msg": "⚖️ **Risco Trabalhista:** Informalidade na contratação pode gerar multas explosivas." } },
+    
     "p7_q3": { 1: { "peso": 10, "msg": "💾 **Perda de Dados:** Sem backup automático na nuvem (3-2-1), risco de perda catastrófica." } }
 }
 
-# Base de Conhecimento para o MODO FALLBACK (Melhoria de Insights)
 KNOWLEDGE_BASE = {
+    # Conteúdo da KNOWLEDGE_BASE omitido por brevidade, mas mantido.
     "Estratégia e Direção": {
         "impl": "A empresa reage ao mercado em vez de ditá-lo. Ausência de um 'Norte Verdadeiro' gera dispersão de recursos. É um risco de sustentabilidade sistêmica.",
         "causas": [ "Falta de Clareza de Longo Prazo (Visão).", "Decisões baseadas em intuição, não em dados (achismo).", "Ausência de Metas Trimestrais (OKRs)." ],
@@ -134,6 +143,7 @@ KNOWLEDGE_BASE = {
 }
 
 MACRO_PILARES = {
+    # Conteúdo do MACRO_PILARES omitido por brevidade, mas mantido.
     "Estratégia e Direção": {"dor": "Falta de Rumo e Visão.", "acao": "Definir OKRs Trimestrais.", "stop_doing": "Decidir apenas por intuição.", "persona": "estrategista"},
     "Gestão Financeira": {"dor": "Risco de Ruína e Descontrolo de Caixa.", "acao": "Segregação Patrimonial e Fluxo de Caixa.", "stop_doing": "Misturar contas PF/PJ.", "persona": "guardia"},
     "Operação e Processos": {"dor": "Ineficiência e Dependência do Dono.", "acao": "Mapear Processos Críticos (POP).", "stop_doing": "Centralizar tarefas delegáveis.", "persona": "hacker"},
@@ -222,6 +232,7 @@ def analyze_cross_patterns(scores_map: Dict[str, float], perfil: dict) -> List[D
     """Camada 2: Gatilhos Cruzados (analisa scores 0-10 normalizados)."""
     insights = []
     
+    # Nota: scores_map aqui já está na escala 0-10, conforme o `analyze_data`
     fin = scores_map.get("Gestão Financeira", 0.0)
     pes = scores_map.get("Pessoas e Gestão de Talentos", 0.0)
     vend = scores_map.get("Vendas e Receita", 0.0)
@@ -267,7 +278,7 @@ def get_classification(score_0_10: float) -> str:
     return "Expansão"
 
 def analyze_data(scores: MDMPScore):
-    data = scores.scores_por_pilar # Escala 1.0 a 3.0
+    data = scores.scores_por_pilar # Escala 1.0 a 3.0 (média do frontend)
     if not data: raise HTTPException(status_code=400, detail="Sem scores")
     
     NORMALIZATION_MAX_SCORE = 3.0
@@ -277,6 +288,7 @@ def analyze_data(scores: MDMPScore):
     scores_ajustados_1_3 = apply_score_penalty(data, perfil)
     
     # 2. Normalização (Camada 3)
+    # Aqui usamos o score ajustado (1-3) para normalizar para 0-10
     normalized_data_ajustado = {k: (v / NORMALIZATION_MAX_SCORE) * 10.0 for k, v in scores_ajustados_1_3.items()}
     
     # 3. Estatísticas Ponderadas
@@ -297,14 +309,14 @@ def analyze_data(scores: MDMPScore):
     insights = []
     if scores.respostas:
         for q_id, resp in scores.respostas.items():
-            if q_id in REGRAS_GATILHO and resp == 1: # Gatilho só dispara na resposta mais negativa
+            # A chave do gatilho é a ID da questão (ex: p1_q0).
+            # A resposta esperada é 1 (a mais negativa).
+            if q_id in REGRAS_GATILHO and resp == 1:
                 regra = REGRAS_GATILHO[q_id][resp]
-                # Peso final é baseado na regra + severidade do porte
                 peso_final = regra['peso']
                 if perfil["nivel_exigencia"] == "crítico":
-                    peso_final += 3 # Aumenta a urgência do problema pontual
+                    peso_final += 3
                     
-                # Urgência calculada (regra rígida)
                 urgencia = (peso_final * 2) + (10 - score_gargalo_0_10)
                 insights.append({"texto": regra['msg'], "urgencia": urgencia})
     
@@ -361,13 +373,11 @@ def generate_fallback_report(analise: dict) -> str:
     
     # Busca na KNOWLEDGE_BASE
     kb_content = KNOWLEDGE_BASE.get(gargalo_nome)
-    if not kb_content: kb_content = KNOWLEDGE_BASE["Estratégia e Direção"] # Fallback genérico
+    if not kb_content: kb_content = KNOWLEDGE_BASE["Estratégia e Direção"]
 
-    # Monta as 3 Causas Raiz (Pontual + Cruzado)
     causas_pontuais = analise.get('insights_prioritarios', "")
     causas_kb = "\n".join([f"- {c}" for c in kb_content['causas']])
     
-    # Junta as causas da KB com os gatilhos se houver espaço
     causas_md = causas_pontuais + "\n" + causas_kb
     causas_md = causas_md.strip()
     
@@ -375,7 +385,6 @@ def generate_fallback_report(analise: dict) -> str:
     scores_sorted = sorted(analise['scores_normalizados_0_10'].items(), key=lambda item: item[1])
     segundo_pilar = scores_sorted[1][0] if len(scores_sorted) > 1 else "Implementação"
     
-    # Monta a implicação primária, priorizando a implicação da KB
     implicacao_primaria = kb_content['impl']
 
     return f"""
@@ -443,6 +452,7 @@ def generate_report(analise: dict, cliente_nome: str):
             "generationConfig": {"temperature": 0.4, "maxOutputTokens": 1500}
         }
         
+        # Implementar retry com backoff exponencial se fosse uma aplicação real
         response = requests.post(
             f"{GEMINI_API_URL}?key={GEMINI_API_KEY}",
             headers={'Content-Type': 'application/json'},
@@ -531,6 +541,3 @@ def diagnose(scores: MDMPScore):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
-
-
-
