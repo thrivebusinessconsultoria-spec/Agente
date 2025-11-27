@@ -71,14 +71,36 @@ class ConsultiveReport(BaseModel):
 
 # --- LÓGICA DE ANÁLISE ---
 def analyze_scores(scores: MDMPScore):
-    """Calcula gargalo/ponto forte a partir do dicionário de scores do front-end."""
+    """Calcula gargalo/ponto forte a partir do dicionário de scores."""
     
-    # Lemos os scores do dicionário aninhado 'scores_por_pilar'
     data = scores.scores_por_pilar
     
+    # ✅ VALIDAÇÕES ADICIONADAS:
     if not data:
-        raise ValueError("Nenhum score de pilar encontrado na requisição.")
-        
+        raise HTTPException(
+            status_code=400, 
+            detail="Nenhum score de pilar fornecido"
+        )
+    
+    if len(data) == 0:
+        raise HTTPException(
+            status_code=400, 
+            detail="É necessário pelo menos um pilar para análise"
+        )
+    
+    # Validar se os valores são numéricos
+    for pilar, score in data.items():
+        if not isinstance(score, (int, float)):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Score inválido para {pilar}: deve ser um número"
+            )
+        if score < 0 or score > 10:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Score fora do intervalo (0-10) para {pilar}: {score}"
+            )
+    
     media = sum(data.values()) / len(data)
     gargalo = min(data, key=data.get)
     forte = max(data, key=data.get)
@@ -217,5 +239,6 @@ def health():
 #     import uvicorn
 #     print("Iniciando Servidor THRIVE...")
 #     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
+
 
 
