@@ -20,10 +20,9 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 CONSULTANT_EMAIL = os.environ.get("CONSULTANT_EMAIL")
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "re_UqFhqRQj_FnZnaGkNfzqFbP5f24xRHY5t")
 RESEND_API_URL = "https://api.resend.com/emails"
-# Usa o modelo estável 1.5-flash
 GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
 
-app = FastAPI(title="Agente de IA THRIVE (Consultor Sênior Final)")
+app = FastAPI(title="Agente de IA THRIVE (Consultor Sênior Acessível)")
 
 # CORS
 app.add_middleware(
@@ -51,49 +50,81 @@ class ConsultiveReport(BaseModel):
     media_geral: float
 
 # ==============================================================================
-#  CÉREBRO DA THRIVE (BASE DE CONHECIMENTO)
+#  CÉREBRO DA THRIVE (BASE DE CONHECIMENTO REFINADA)
 # ==============================================================================
 
 PERSONAS = {
-    "estrategista": { "nome": "Sr. João da Terra", "papel": "O Estrategista", "frase": "Quem não planeia, planeia falhar." },
-    "guardia": { "nome": "Dra. Clara Lex", "papel": "A Guardiã", "frase": "Segurança primeiro, lucro depois." },
-    "hacker": { "nome": "K4J1 (Caju)", "papel": "O Hacker", "frase": "Automatize o tédio, foque no valor." }
+    "estrategista": { "nome": "Sr. João da Terra", "papel": "O Estrategista", "frase": "Quem não planeia o plantio, não colhe o futuro." },
+    "guardia": { "nome": "Dra. Clara Lex", "papel": "A Guardiã", "frase": "Segurança não é custo, é a base do lucro." },
+    "hacker": { "nome": "K4J1 (Caju)", "papel": "O Hacker", "frase": "Trabalhe de forma inteligente, não apenas duro." }
 }
 
-# GATILHOS CIRÚRGICOS (Resposta = 1 -> Problema Grave)
 REGRAS_GATILHO = {
-    "p0_q0": { 1: { "peso": 9, "msg": "⚠️ **Crise de Identidade:** Sem Missão/Visão claras, a equipa não sabe para onde remar." } },
-    "p0_q4": { 1: { "peso": 7, "msg": "🎯 **Público:** Vender para 'todos' é erro de principiante. Defina a sua Persona." } },
-    "p0_q11": { 1: { "peso": 10, "msg": "💀 **Sucessão:** Se você faltar, a empresa para. Risco mortal para o negócio." } },
-    "p1_q0": { 1: { "peso": 10, "msg": "🚨 **MISTURA PATRIMONIAL:** Pagar contas de casa com a empresa leva à falência." } },
-    "p1_q4": { 1: { "peso": 9, "msg": "📉 **Cegueira de Caixa:** Sem controlo diário, você gere no escuro." } },
-    "p1_q10": { 1: { "peso": 9, "msg": "⚖️ **Ponto de Equilíbrio:** Você não sabe a meta mínima para não ter prejuízo." } },
-    "p2_q2": { 1: { "peso": 9, "msg": "🔗 **Centralização:** A operação depende 100% de você. Você é o gargalo." } },
-    "p3_q0": { 1: { "peso": 8, "msg": "📉 **Funil Invisível:** Vendas acontecem por sorte, não por processo." } },
-    "p5_q0": { 1: { "peso": 9, "msg": "🤝 **Risco Societário:** Acordo de sócios 'de boca' é bomba relógio." } },
-    "p5_q4": { 1: { "peso": 10, "msg": "⚖️ **Passivo Trabalhista:** Colaboradores informais podem fechar a sua empresa." } },
-    "p6_q2": { 1: { "peso": 10, "msg": "💾 **Risco de Dados:** Sem backup na nuvem, um vírus apaga a história da empresa." } }
+    "p0_q0": { 1: { "peso": 9, "msg": "⚠️ **Falta de Rumo:** Sem definir claramente a Missão (o 'Porquê'), a equipa trabalha sem propósito e com baixa energia." } },
+    "p0_q4": { 1: { "peso": 7, "msg": "🎯 **Cliente Indefinido:** Tentar vender para 'todos' é a receita para gastar muito marketing e vender pouco." } },
+    "p0_q11": { 1: { "peso": 10, "msg": "💀 **Dependência Total:** Se você precisar se ausentar hoje, a empresa para? Isso é um risco enorme para a sua família e patrimônio." } },
+    "p1_q0": { 1: { "peso": 10, "msg": "🚨 **Caixa Misturado:** Pagar contas de casa com o dinheiro da empresa esconde o lucro real e pode levar à falência sem aviso." } },
+    "p1_q4": { 1: { "peso": 9, "msg": "📉 **Gestão no Escuro:** Sem saber exatamente quanto entra e sai hoje, você não pode tomar decisões seguras para amanhã." } },
+    "p1_q10": { 1: { "peso": 9, "msg": "⚖️ **Meta de Sobrevivência:** Você desconhece o seu 'Ponto de Equilíbrio'. É como dirigir sem saber quanto combustível resta." } },
+    "p2_q2": { 1: { "peso": 9, "msg": "🔗 **Gargalo do Dono:** Você centraliza tudo. Enquanto não delegar, a empresa nunca vai crescer além das suas 24 horas." } },
+    "p3_q0": { 1: { "peso": 8, "msg": "📉 **Vendas por Sorte:** Sem um processo visual (Funil), você não sabe quanto vai entrar no final do mês." } },
+    "p5_q0": { 1: { "peso": 9, "msg": "🤝 **Acordo de Boca:** Sócios sem contrato escrito é o maior causador de brigas que fecham empresas saudáveis." } },
+    "p5_q4": { 1: { "peso": 10, "msg": "⚖️ **Risco Trabalhista:** A informalidade na contratação pode gerar multas que o caixa da empresa não aguenta pagar." } },
+    "p6_q2": { 1: { "peso": 10, "msg": "💾 **Perda de Dados:** Sem cópia de segurança (backup) na nuvem, um simples vírus pode apagar anos de trabalho." } }
 }
 
 MACRO_PILARES = {
-    "1. Estratégico": {"dor": "Falta de direção estratégica.", "acao": "Definir OKRs trimestrais.", "persona": "estrategista"},
-    "2. Financeiro": {"dor": "Descontrolo de caixa e risco de ruína.", "acao": "Implantar gestão financeira diária (Caixa Zero).", "persona": "guardia"},
-    "3. Operacional": {"dor": "Ineficiência e dependência dos sócios.", "acao": "Mapear processos críticos (POP).", "persona": "hacker"},
-    "4. Comercial": {"dor": "Vendas imprevisíveis e dependentes de sorte.", "acao": "Estruturar funil de vendas e CRM.", "persona": "estrategista"},
-    "5. Pessoas (RH)": {"dor": "Equipa desengajada ou alta rotatividade.", "acao": "Criar plano de cargos e rotina de feedback.", "persona": "guardia"},
-    "6. Jurídico": {"dor": "Exposição a riscos legais e passivos.", "acao": "Audit e regularização de contratos.", "persona": "guardia"},
-    "7. Tecnológico": {"dor": "Processos manuais lentos e inseguros.", "acao": "Transformação digital e segurança.", "persona": "hacker"}
+    "1. Estratégico": {
+        "dor": "Falta de um caminho claro para o futuro.", 
+        "acao": "Definir 3 grandes metas (OKRs) para o trimestre.", 
+        "stop_doing": "Pare de decidir baseado apenas no 'feeling' ou na intuição do momento.",
+        "persona": "estrategista"
+    },
+    "2. Financeiro": {
+        "dor": "Descontrolo do dinheiro e risco de fechar no vermelho.", 
+        "acao": "Implantar o 'Caixa Zero' (anotar tudo o que entra e sai).", 
+        "stop_doing": "Pare imediatamente de usar o cartão da empresa para despesas pessoais.",
+        "persona": "guardia"
+    },
+    "3. Operacional": {
+        "dor": "A empresa depende 100% da sua presença física.", 
+        "acao": "Escrever o manual (POP) da tarefa que mais consome o seu tempo.", 
+        "stop_doing": "Pare de centralizar tarefas repetitivas que outros poderiam fazer.",
+        "persona": "hacker"
+    },
+    "4. Comercial": {
+        "dor": "Vendas imprevisíveis e dependentes de indicações.", 
+        "acao": "Organizar os clientes num Funil de Vendas simples.", 
+        "stop_doing": "Pare de esperar sentado que o cliente bata à porta.",
+        "persona": "estrategista"
+    },
+    "5. Pessoas (RH)": {
+        "dor": "Equipa desmotivada ou que não sabe o que fazer.", 
+        "acao": "Criar descrições simples do que se espera de cada cargo.", 
+        "stop_doing": "Pare de dar feedback apenas quando algo corre mal (crítica destrutiva).",
+        "persona": "guardia"
+    },
+    "6. Jurídico": {
+        "dor": "Vulnerabilidade a processos e multas.", 
+        "acao": "Revisar os contratos principais para garantir segurança.", 
+        "stop_doing": "Pare de fechar negócios ou parcerias apenas com acordos verbais.",
+        "persona": "guardia"
+    },
+    "7. Tecnológico": {
+        "dor": "Gestão lenta baseada em papel ou memória.", 
+        "acao": "Adotar um sistema simples para centralizar as informações.", 
+        "stop_doing": "Pare de confiar dados importantes a cadernos ou planilhas soltas.",
+        "persona": "hacker"
+    }
 }
 
 # ==============================================================================
-#  MOTOR DE INTELIGÊNCIA (LÓGICA AVANÇADA)
+#  MOTOR DE INTELIGÊNCIA (LÓGICA TRADUZIDA)
 # ==============================================================================
 
 def analyze_cross_patterns(scores_map: Dict[str, float]) -> List[Dict[str, str]]:
-    """Analisa CAUSA RAIZ e correlações complexas (Sintoma vs Causa)."""
     insights = []
     
-    # Normaliza notas para escala 0-10 para facilitar a lógica
     def get_score(key_part):
         for k, v in scores_map.items():
             if key_part.lower() in k.lower():
@@ -107,46 +138,42 @@ def analyze_cross_patterns(scores_map: Dict[str, float]) -> List[Dict[str, str]]
     vend = get_score('comercial')
     jur = get_score('jurídico')
 
-    # 1. SINTOMA: Vendas Baixas + CAUSA RAIZ: Margem (Financeiro)
+    # Lógica traduzida para linguagem simples
     if vend <= 5 and fin <= 4:
         insights.append({
-            "perfil": "⚠️ Venda sem Margem",
-            "analise": "O seu problema não é só vender, é lucrar. A baixa margem força descontos agressivos, destruindo o caixa.",
-            "risco": "Margem de Contribuição Negativa (Pagar para vender).",
-            "recomendacao": "Engenharia Financeira e Revisão de Precificação."
+            "perfil": "⚠️ Vender muito, Lucrar pouco",
+            "analise": "Você pode estar a 'pagar para trabalhar'. O problema não é falta de clientes, é que o preço ou os custos estão a comer a margem de lucro.",
+            "risco": "Vender cada vez mais e ver a conta bancária cada vez menor.",
+            "recomendacao": "Revisar preços e custos antes de investir em mais vendas."
         })
 
-    # 2. Cenário "Empresa Rica, Gestão Pobre"
     if fin >= 7 and pes <= 4:
         insights.append({
-            "perfil": "⚠️ Caixa Forte, Cultura Frágil",
-            "analise": "A sua empresa gera caixa, mas falha em reter quem gera esse resultado. O dinheiro hoje mascara a ineficiência.",
-            "risco": "Perda de capital intelectual e dependência de mercenários.",
-            "recomendacao": "Programa de Retenção de Talentos e Mentoria de Liderança."
+            "perfil": "⚠️ Caixa Cheio, Equipa Vazia",
+            "analise": "A empresa tem dinheiro hoje, mas as pessoas estão infelizes. Isso vai gerar saídas de funcionários (turnover) que custarão caro no futuro.",
+            "risco": "Perder os melhores talentos para a concorrência.",
+            "recomendacao": "Investir em retenção e liderança humana."
         })
 
-    # 3. Cenário "O Visionário Caótico"
     if est >= 7 and proc <= 4:
         insights.append({
-            "perfil": "⚠️ Visionário sem Processo",
-            "analise": "Você sabe onde quer chegar, mas a operação não aguenta o tranco. Tudo está centralizado na sua cabeça.",
-            "risco": "Gargalo do fundador (Burnout) e inconsistência na entrega.",
-            "recomendacao": "Mapeamento de Processos (POPs) e Automação Operacional."
+            "perfil": "⚠️ Muitas Ideias, Pouca Ação",
+            "analise": "Você sabe exatamente onde quer chegar, mas o dia a dia é um caos. A operação não consegue entregar o que a sua mente cria.",
+            "risco": "Exaustão mental (Burnout) e promessas não cumpridas aos clientes.",
+            "recomendacao": "Organizar a casa (Processos) antes de inventar novidades."
         })
 
-    # 4. Cenário "O Vendedor Solitário"
     if vend >= 7 and (jur <= 4 or fin <= 4):
         insights.append({
-            "perfil": "⚠️ Gigante de Pés de Barro",
-            "analise": "Excelente tração comercial, mas retaguarda perigosa. Acelerando um carro sem freios.",
-            "risco": "Passivo oculto (trabalhista/tributário) ou descontrole de custos.",
-            "recomendacao": "Blindagem Jurídica e BPO Financeiro."
+            "perfil": "⚠️ Gigante com Pés de Barro",
+            "analise": "As vendas vão muito bem, mas a base (contratos e financeiro) é frágil. Um único problema legal ou fiscal pode derrubar tudo o que construiu.",
+            "risco": "Crescer rápido demais e quebrar por falta de estrutura.",
+            "recomendacao": "Blindagem Jurídica e Organização Financeira urgente."
         })
 
     return insights
 
 def analyze_data(scores: MDMPScore):
-    """Processa dados e gera estratégia."""
     data = scores.scores_por_pilar
     if not data: raise HTTPException(status_code=400, detail="Sem scores")
     
@@ -154,18 +181,18 @@ def analyze_data(scores: MDMPScore):
     gargalo_key = min(data, key=data.get)
     forte_key = max(data, key=data.get)
     
-    macro_key = next((k for k in MACRO_PILARES.keys() if gargalo_key in k or k in gargalo_key), "1. Estratégico")
-    macro_info = MACRO_PILARES[macro_key]
-    persona = PERSONAS[macro_info["persona"]]
+    macro_key_gargalo = next((k for k in MACRO_PILARES.keys() if gargalo_key in k or k in gargalo_key), "1. Estratégico")
+    macro_info_gargalo = MACRO_PILARES[macro_key_gargalo]
+    persona = PERSONAS[macro_info_gargalo["persona"]]
 
-    # Gatilhos Simples
+    macro_key_forte = next((k for k in MACRO_PILARES.keys() if forte_key in k or k in forte_key), "1. Estratégico")
+
     insights = []
     if scores.respostas:
         for q_id, resp in scores.respostas.items():
             if q_id in REGRAS_GATILHO and resp in REGRAS_GATILHO[q_id]:
                 regra = REGRAS_GATILHO[q_id][resp]
                 idx_pilar = int(q_id.split('_')[0].replace('p', ''))
-                # Tenta buscar nome do pilar com segurança
                 try:
                     nome_pilar = list(data.keys())[idx_pilar]
                 except IndexError:
@@ -177,26 +204,27 @@ def analyze_data(scores: MDMPScore):
     
     insights = sorted(insights, key=lambda x: x['urgencia'], reverse=True)[:4]
     
-    # Lógica Cruzada
     analise_cruzada = analyze_cross_patterns(data)
     texto_cruzado = ""
     briefing_cruzado = ""
     if analise_cruzada:
-        texto_cruzado = "\n### 🧬 Análise de Causa Raiz\n"
+        texto_cruzado = "\n### 🧬 O que os números revelam (Causa Raiz)\n"
         for item in analise_cruzada:
-            texto_cruzado += f"**{item['perfil']}**\n{item['analise']}\n👉 **Ação de Causa Raiz:** {item['recomendacao']}\n\n"
+            texto_cruzado += f"**{item['perfil']}**\n{item['analise']}\n👉 **A Solução:** {item['recomendacao']}\n\n"
             briefing_cruzado += f"[{item['perfil']}] -> Sugerir: {item['recomendacao']} | "
 
     return {
         "gargalo": gargalo_key,
         "gargalo_display": gargalo_key.replace('_', ' ').title(),
         "forte": forte_key,
+        "forte_display": forte_key.replace('_', ' ').title(),
         "media": media,
         "persona_nome": persona["nome"],
         "persona_papel": persona["papel"],
         "frase": persona["frase"],
-        "dor_macro": macro_info["dor"],
-        "acao_macro": macro_info["acao"],
+        "dor_macro": macro_info_gargalo["dor"],
+        "acao_macro": macro_info_gargalo["acao"],
+        "stop_doing": macro_info_gargalo["stop_doing"],
         "insights_list": insights, 
         "insights_prioritarios": "\n".join([f"- {i['texto']}" for i in insights]),
         "texto_cruzado": texto_cruzado,
@@ -205,75 +233,96 @@ def analyze_data(scores: MDMPScore):
     }
 
 # ==============================================================================
-#  GERAÇÃO DE RELATÓRIO (HÍBRIDA: IA + FALLBACK PREMIUM)
+#  GERAÇÃO DE RELATÓRIO (HÍBRIDA: IA + FALLBACK ACESSÍVEL)
 # ==============================================================================
 
 def generate_fallback_report(analysis_data: dict, cliente_nome: str) -> str:
-    """Gera um relatório PREMIUM, VISUAL e ESTRATÉGICO se a IA falhar."""
+    """Gera um relatório CLARO, DIRETO e PROFISSIONAL se a IA falhar."""
     
     gargalo = analysis_data['gargalo_display']
+    forte = analysis_data['forte_display']
     data_hoje = datetime.now().strftime('%d/%m/%Y')
     media = analysis_data['media']
     
-    # Lógica de Nível
-    nivel = "SOBREVIVÊNCIA" if media < 1.6 else "ORGANIZAÇÃO" if media < 2.4 else "EXPANSÃO"
-    cor_nivel = "🔴" if nivel == "SOBREVIVÊNCIA" else "🟡" if nivel == "ORGANIZAÇÃO" else "🟢"
+    # Lógica de Nível Traduzida
+    if media < 1.6:
+        nivel = "SOBREVIVÊNCIA"
+        cor_nivel = "🔴"
+        descricao_nivel = "A empresa corre riscos sérios. O foco é proteger o caixa."
+    elif media < 2.4:
+        nivel = "ORGANIZAÇÃO"
+        cor_nivel = "🟡"
+        descricao_nivel = "A empresa fatura, mas é bagunçada. Precisa de processos."
+    else:
+        nivel = "EXPANSÃO"
+        cor_nivel = "🟢"
+        descricao_nivel = "A empresa está saudável. Hora de escalar e inovar."
 
-    # Lista de Problemas Visuais
     lista_problemas = ""
     if analysis_data['insights_list']:
         for item in analysis_data['insights_list']:
             lista_problemas += f"❌ {item['texto'].replace('**', '')}\n"
     else:
-        lista_problemas = f"⚠️ Ineficiência estrutural detetada no pilar {gargalo}."
+        lista_problemas = f"⚠️ Encontrámos ineficiências estruturais no pilar {gargalo}."
 
     return f"""
-# 📊 Relatório de Alavancagem Estratégica THRIVE
+# 📊 Relatório de Diagnóstico Empresarial THRIVE
 
 **Cliente:** {cliente_nome} | **Data:** {data_hoje}
-**Consultor Responsável:** {analysis_data['persona_nome']}
+**Especialista Responsável:** {analysis_data['persona_nome']}
 
 ---
 
-## 1. O Estado Atual da Nação (MDMP)
-A sua empresa foi auditada pela nossa metodologia proprietária.
-**Resultado Global:** {media:.2f} / 3.0
+## 1. Onde a sua empresa está hoje?
+Analisámos as suas respostas e classificámos o momento atual do negócio.
+**Nota Geral:** {media:.2f} / 3.0
 
-| Nível Identificado | Significado Estratégico |
+| O Seu Nível | O Que Isso Significa |
 | :--- | :--- |
-| **{cor_nivel} {nivel}** | O seu foco atual deve ser a **{analysis_data['acao_macro']}**. Qualquer outro esforço é desperdício de energia. |
+| **{cor_nivel} {nivel}** | {descricao_nivel} |
+
+### 🏆 O Seu Grande Trunfo: {forte}
+A área de **{forte}** é o motor do seu negócio hoje. 
+**Dica:** Use a segurança que tem aqui para financiar as melhorias onde tem problemas.
 
 ---
 
-## 2. Diagnóstico de Precisão: Onde Dói?
-O sistema isolou o pilar **{gargalo}** como o Gargalo Crítico.
-Na Teoria das Restrições, este é o ponto que determina a velocidade de todo o sistema.
+## 2. Onde o sapato aperta (O Problema Principal)
+Identificámos que o pilar **{gargalo}** é o que está a travar o seu crescimento.
+É como andar com o travão de mão puxado: você gasta energia, mas não sai do lugar.
 
-### 🔍 Sintomas Agudos (Baseado nas suas respostas):
+### 🔍 Pontos de Atenção Imediata:
 {lista_problemas}
 
 {analysis_data['texto_cruzado']}
 
 ---
 
-## 3. O Plano de Batalha (Cronograma Tático)
-Não vamos tentar resolver tudo. Vamos resolver o que gera ROI.
+## 3. O Plano de Ação (Próximos 90 Dias)
+Para mudar este cenário, você precisa começar a fazer coisas novas e **parar** de fazer o que não funciona.
 
-| Fase | Objetivo Estratégico | Ação Tática (O Que Fazer) |
+### 🛑 PARE AGORA (Stop Doing)
+**{analysis_data['stop_doing']}**
+*Isso está a gastar o seu tempo e dinheiro sem trazer retorno.*
+
+### ✅ COMECE AGORA (O Seu Plano)
+
+| Fase | O Que Fazer (Ação Prática) | Porquê? (Objetivo) |
 | :--- | :--- | :--- |
-| **Fase 1: BLINDAGEM (0-30 Dias)** | **Estancar a Sangria** | Foco total em resolver: **{analysis_data['acao_macro']}**. Eliminar o Risco de Ruína. |
-| **Fase 2: ESTRUTURA (30-90 Dias)** | **Profissionalização** | Criar o POP (Procedimento) para sair da dependência do dono. Implementar SSOT (Fonte Única de Verdade). |
-| **Fase 3: ALAVANCAGEM (90+ Dias)** | **Escala e LTV** | Implementar rotina de gestão semanal e focar em CAC/LTV. |
+| **Fase 1: PROTEGER (0-30 Dias)** | **{analysis_data['acao_macro']}** | Para eliminar riscos imediatos e estancar prejuízos. |
+| **Fase 2: ORGANIZAR (30-90 Dias)** | Criar um processo padrão (manual) para esta área. | Para que a empresa funcione sem depender 100% de si. |
+| **Fase 3: CRESCER (90+ Dias)** | Definir metas de crescimento para este setor. | Para escalar resultados de forma previsível. |
 
 ---
 
-## 4. Próximo Passo Oficial
-O relatório de IA é a bússola, mas o mapa é humano.
-Sua jornada para a Alavancagem Estratégica começa agora.
+## 4. Próximo Passo Recomendado
+Este relatório mostra **o que** está errado. O nosso trabalho é ajudar **como** resolver.
+Não tente fazer tudo sozinho. 
 
-**CTA EXCLUSIVO:**
-Sua jornada para a Alavancagem Estratégica começa agora. O relatório completo é a base. O próximo passo é o nosso acompanhamento humano e cirúrgico.
-**[Responda a este e-mail para agendar a sua Sessão Estratégica de Devolutiva e iniciar a Fase de Blindagem]**
+**CONVITE ESPECIAL:**
+A sua empresa tem potencial para o próximo nível.
+**[Responda a este e-mail para agendar uma Sessão de Devolutiva Gratuita]**
+*Vamos desenhar o mapa detalhado da sua Fase 1 juntos.*
 
 > "{analysis_data['frase']}"
 
@@ -282,38 +331,39 @@ Sua jornada para a Alavancagem Estratégica começa agora. O relatório completo
 """
 
 def generate_report(analise: dict, cliente_nome: str):
-    """Tenta gerar com IA. Se falhar, usa o template PREMIUM acima."""
+    """Tenta gerar com IA. Se falhar, usa o template acessível acima."""
     
     fallback_text = generate_fallback_report(analise, cliente_nome)
 
     if not GEMINI_API_KEY:
         return fallback_text, "Modo Técnico (Offline)"
 
-    # Prompt RAG (Retrieval Augmented Generation)
+    # Prompt RAG com Instruções de Linguagem Simples
     prompt = f"""
     Você é o Consultor Sênior da Thrive Business ({analise['persona_nome']}).
-    Escreva um relatório consultivo de alto nível para o cliente {cliente_nome}.
+    Escreva um relatório para o cliente {cliente_nome}.
     
-    DADOS:
-    - Média: {analise['media']:.2f}
-    - Pior Pilar: {analise['gargalo_display']}
+    OBJETIVO: O texto deve ser extremamente profissional, mas FÁCIL DE LER para um dono de pequena empresa que não entende termos técnicos difíceis.
     
-    INSIGHTS DE CAUSA RAIZ (Inclua isto obrigatoriamente):
+    DADOS DO CLIENTE:
+    - Nível: {analise['media']:.2f} (Escala de 1 a 3)
+    - Principal Problema: {analise['gargalo_display']}
+    - Ponto Forte: {analise['forte_display']}
+    - Ação Recomendada: "{analise['acao_macro']}"
+    - O que PARAR de fazer: "{analise['stop_doing']}"
+    
+    INSIGHTS (Traduza isso para linguagem de negócios simples):
     {analise['texto_cruzado']}
     
-    PROBLEMAS DETECTADOS:
+    LISTA DE PROBLEMAS (Seja direto):
     {analise['insights_prioritarios']}
     
-    AÇÃO MACRO (Gargalo): "{analise['acao_macro']}"
-    
-    ESTRUTURA OBRIGATÓRIA (Use Markdown e Tabelas):
-    1. Introdução Empática sobre o nível de maturidade.
-    2. Análise do Gargalo (Use termos como 'Risco de Ruína', 'SSOT', 'Alavancagem').
-    3. Tabela de Plano de Ação com 3 Fases EXATAS: 
-       - Fase 1: Blindagem (0-30 Dias) -> Foco: {analise['acao_macro']}
-       - Fase 2: Estrutura (30-90 Dias) -> Foco: Profissionalização
-       - Fase 3: Alavancagem (90+ Dias) -> Foco: Crescimento
-    4. Conclusão com este CTA EXATO: "Sua jornada para a Alavancagem Estratégica começa agora. O relatório completo é a base. O próximo passo é o nosso acompanhamento humano e cirúrgico. Responda a este e-mail para agendar sua Sessão Estratégica de Devolutiva e iniciar a Fase de Blindagem."
+    ESTRUTURA DO RELATÓRIO (Use Markdown e Tabelas):
+    1. Introdução: Diga o nível da empresa de forma clara.
+    2. Análise do Ponto Forte: Elogie a área {analise['forte_display']}.
+    3. O Problema: Explique por que o {analise['gargalo_display']} está a travar o crescimento.
+    4. Tabela "Pare e Comece": Destaque o que parar de fazer e o plano de 3 fases (Proteger, Organizar, Crescer).
+    5. Conclusão: Convide para a "Sessão de Devolutiva" para ajudar a implementar.
     
     Assine com a frase: "{analise['frase']}"
     """
@@ -388,7 +438,7 @@ def send_email_resend(scores: MDMPScore, analysis: dict, report: str, modo: str)
 # --- ROTAS ---
 @app.get("/")
 def root():
-    return {"status": "Thrive API Online", "mode": "Hybrid Pro 5.0 (Senior Consultant)"}
+    return {"status": "Thrive API Online", "mode": "Hybrid Pro 8.0 (Accessible Language)"}
 
 @app.get("/api/health")
 def health():
@@ -403,7 +453,7 @@ def diagnose(scores: MDMPScore):
     return {
         "status": "Sucesso",
         "gargalo_critico": analise['gargalo_display'],
-        "ponto_forte": analise['forte'].replace('_', ' ').title(),
+        "ponto_forte": analise['forte_display'],
         "analise_ia": relatorio,
         "media_geral": analise['media']
     }
