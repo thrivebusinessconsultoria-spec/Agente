@@ -27,7 +27,7 @@ if not RESEND_API_KEY:
 
 RESEND_API_URL = "https://api.resend.com/emails"
 GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
-WHATSAPP_NUMBER = "5511999999999"
+WHATSAPP_NUMBER = os.environ.get("WHATSAPP_NUMBER", "5524992778145")
 
 app = FastAPI(title="Agente IA THRIVE - Consultor Sênior Consolidado")
 
@@ -531,3 +531,4 @@ def diagnose(scores: MDMPScore):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
+
