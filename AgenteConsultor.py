@@ -38,13 +38,17 @@ except FileNotFoundError:
     logging.warning("Arquivo de prompt não encontrado. Usando padrão.")
 
 
-# CORS (Permite comunicação com o Front-end)
+from fastapi.middleware.cors import CORSMiddleware
+
+# CORS - Configuração COMPLETA
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # Mantenha "*" para o seu blog. Em produção, use o domínio exato.
+    allow_origins=["*"],  # Em produção: ["https://seublog.com"]
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=3600,
 )
 
 
@@ -213,3 +217,4 @@ def health():
 #     import uvicorn
 #     print("Iniciando Servidor THRIVE...")
 #     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
+
