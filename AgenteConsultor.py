@@ -1,176 +1,172 @@
 # -*- coding: utf-8 -*-
 """
-THRIVE BUSINESS - AGENTE CONSULTOR SÊNIOR OTIMIZADO
-Versão: 2.0 - Performance, Segurança e Confiabilidade
+THRIVE BUSINESS - Sistema de Diagnóstico de Maturidade Empresarial (MDMP)
+Agente Consultivo Inteligente com Arquitetura Híbrida (IA + Sistema Especialista)
 """
+
 import os
 import logging
 from typing import Optional, Dict, List
-from datetime import datetime, timedelta
-import requests
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel, EmailStr, validator
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.gzip import GZIPMiddleware
-from dotenv import load_dotenv
+from datetime import datetime
 import urllib.parse
-import time
-from functools import lru_cache
-import hashlib
 
-# ============================================================================== 
-# CONFIGURAÇÃO E INICIALIZAÇÃO
-# ==============================================================================
+import requests
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
+from dotenv import load_dotenv
+
+# ============================================================================
+# CONFIGURAÇÃO INICIAL
+# ============================================================================
+
 load_dotenv()
 
-# Logging estruturado
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-# Variáveis de ambiente (com validação)
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-CONSULTANT_EMAIL = os.environ.get("CONSULTANT_EMAIL")
-RESEND_API_KEY = os.environ.get("RESEND_API_KEY")
-WHATSAPP_NUMBER = os.environ.get("WHATSAPP_NUMBER", "5524992778145")
+# ============================================================================
+# VARIÁVEIS DE AMBIENTE
+# ============================================================================
 
-# URLs
-RESEND_API_URL = "https://api.resend.com/emails"
-GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent"
-
-# Configurações de performance
-GEMINI_TIMEOUT = 25  # segundos
-GEMINI_MAX_RETRIES = 2
-CACHE_TTL = 3600  # 1 hora
-
-# Validação de configuração crítica
-if not GEMINI_API_KEY:
-    logger.warning("⚠️ GEMINI_API_KEY não configurada. Apenas modo fallback disponível.")
-if not RESEND_API_KEY:
-    logger.warning("⚠️ RESEND_API_KEY não configurada. Emails desabilitados.")
-
-# ============================================================================== 
-# INICIALIZAÇÃO DO APP
-# ==============================================================================
-app = FastAPI(
-    title="THRIVE Business Intelligence API",
-    description="Agente Consultor Sênior com IA para diagnóstico empresarial",
-    version="2.0.0"
-)
-
-# Middlewares (ordem importa!)
-app.add_middleware(GZIPMiddleware, minimum_size=1000)  # Compressão de resposta
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["*"],
-    max_age=3600
-)
-
-# ============================================================================== 
-# MODELOS DE DADOS COM VALIDAÇÃO ROBUSTA
-# ==============================================================================
-class MDMPScore(BaseModel):
-    nome_cliente: str
-    email_cliente: EmailStr  # Validação automática de email
-    telefone_cliente: Optional[str] = None
-    scores_por_pilar: Dict[str, float]
-    total_avg: float
-    respostas: Optional[Dict[str, int]] = {}
+class Config:
+    """Centraliza todas as configurações do sistema"""
+    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+    RESEND_API_KEY = os.getenv("RESEND_API_KEY")
+    CONSULTANT_EMAIL = os.getenv("CONSULTANT_EMAIL", "thrivebusinessconsultoria@gmail.com")
+    WHATSAPP_NUMBER = os.getenv("WHATSAPP_NUMBER", "5524992778145")
     
-    @validator('nome_cliente')
-    def validate_nome(cls, v):
-        if len(v.strip()) < 2:
-            raise ValueError('Nome deve ter pelo menos 2 caracteres')
-        return v.strip()
+    GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent"
+    RESEND_API_URL = "https://api.resend.com/emails"
     
-    @validator('scores_por_pilar')
-    def validate_scores(cls, v):
-        if not v:
-            raise ValueError('Scores por pilar não podem estar vazios')
-        for pilar, score in v.items():
-            if not (1.0 <= score <= 3.0):
-                raise ValueError(f'Score de {pilar} fora do intervalo (1.0-3.0): {score}')
-        return v
-    
-    @validator('total_avg')
-    def validate_avg(cls, v):
-        if not (1.0 <= v <= 3.0):
-            raise ValueError(f'Média total fora do intervalo (1.0-3.0): {v}')
-        return v
+    # Validação
+    if not RESEND_API_KEY:
+        logger.warning("⚠️ RESEND_API_KEY não configurada. Emails desabilitados.")
 
-class ConsultiveReport(BaseModel):
+# ============================================================================
+# MODELOS DE DADOS (PYDANTIC)
+# ============================================================================
+
+class DiagnosisRequest(BaseModel):
+    """Payload recebido do frontend"""
+    nome_cliente: str = Field(..., min_length=2, max_length=200)
+    email_cliente: str = Field(..., regex=r'^[\w\.-]+@[\w\.-]+\.\w+$')
+    telefone_cliente: Optional[str] = Field(None, max_length=20)
+    scores_por_pilar: Dict[str, float] = Field(..., description="Scores na escala 1.0-3.0")
+    total_avg: float = Field(..., ge=1.0, le=3.0)
+    respostas: Dict[str, int] = Field(default_factory=dict)
+
+
+class DiagnosisResponse(BaseModel):
+    """Resposta enviada ao frontend"""
     status: str
     gargalo_critico: str
     ponto_forte: str
     analise_ia: str
     score_normalizado: float
     classificacao: str
-    tempo_processamento: float  # Novo campo para métricas
+    media_geral: Optional[float] = None
 
-# ============================================================================== 
-# CACHE E OTIMIZAÇÕES
-# ==============================================================================
-@lru_cache(maxsize=100)
-def get_cached_persona(persona_key: str) -> dict:
-    """Cache de personas para evitar reprocessamento."""
-    return PERSONAS.get(persona_key, PERSONAS["estrategista"])
+# ============================================================================
+# BASE DE CONHECIMENTO - PERSONAS
+# ============================================================================
 
-@lru_cache(maxsize=50)
-def get_cached_macro_pilar(pilar: str) -> dict:
-    """Cache de macro pilares."""
-    return MACRO_PILARES.get(pilar, MACRO_PILARES["Estratégia e Direção"])
-
-def generate_cache_key(scores: MDMPScore) -> str:
-    """Gera chave única para cache baseada nos scores."""
-    score_str = str(sorted(scores.scores_por_pilar.items()))
-    return hashlib.md5(score_str.encode()).hexdigest()
-
-# ============================================================================== 
-# BASES DE CONHECIMENTO (OTIMIZADAS)
-# ==============================================================================
 PERSONAS = {
     "estrategista": {
         "nome": "Sr. João da Terra",
-        "papel": "O Estrategista",
+        "papel": "O Estrategista (Coruja Agricultor)",
         "frase": "Quem não planeja o plantio, não colhe o futuro.",
-        "vocabulario": "terreno, raízes, colheita, semear, estação, clima, frutos, sustentabilidade"
+        "vocabulario": "terreno, raízes, colheita, semear, estação, clima, frutos, cultivo, sustentabilidade"
     },
     "guardia": {
         "nome": "Dra. Clara Lex",
-        "papel": "A Guardiã",
+        "papel": "A Guardiã (Loba Advogada)",
         "frase": "Segurança não é custo, é a base do lucro.",
-        "vocabulario": "blindagem, alicerce, risco, contrato, lei, proteção, conformidade, defesa"
+        "vocabulario": "blindagem, alicerce, risco, contrato, lei, proteção, conformidade, defesa, passivo, norma"
     },
     "hacker": {
         "nome": "K4J1 (Caju)",
-        "papel": "O Hacker",
+        "papel": "O Hacker (Raposa Hacker)",
         "frase": "Trabalhe de forma inteligente, não apenas duro.",
-        "vocabulario": "sistema, bug, atualização, código, rede, upgrade, algoritmo, automação"
+        "vocabulario": "sistema, bug, atualização, código, rede, conexão, upgrade, versão beta, algoritmo, automação"
     }
 }
 
-REGRAS_GATILHO = {
-    "p1_q0": {1: {"peso": 9, "msg": "⚠️ Falta de Rumo: Ausência de Missão clara."}},
-    "p2_q1": {1: {"peso": 10, "msg": "🚨 Caixa Misturado: Erro nº 1 que leva à falência."}},
-    "p3_q0": {1: {"peso": 9, "msg": "🔗 Conhecimento Tribal: Processos não documentados."}},
-    "p4_q0": {1: {"peso": 8, "msg": "📉 Vendas por Sorte: Receita imprevisível."}},
-    "p6_q2": {1: {"peso": 10, "msg": "⚖️ Risco Trabalhista: Passivo explosivo."}},
-    "p7_q3": {1: {"peso": 10, "msg": "💾 Perda de Dados: Risco catastrófico."}}
+# ============================================================================
+# BASE DE CONHECIMENTO - GATILHOS CRÍTICOS
+# ============================================================================
+
+CRITICAL_TRIGGERS = {
+    "p1_q0": {
+        1: {
+            "peso": 9,
+            "msg": "⚠️ **Falta de Rumo:** Ausência de Missão clara deixa a equipa sem propósito."
+        }
+    },
+    "p1_q1": {
+        1: {
+            "peso": 8,
+            "msg": "🔥 **Miopia Estratégica:** Planeamento de longo prazo inexistente ou na cabeça."
+        }
+    },
+    "p2_q0": {
+        1: {
+            "peso": 10,
+            "msg": "🚨 **Caixa Misturado:** Misturar contas PF/PJ é o erro nº 1 que leva à falência."
+        }
+    },
+    "p2_q1": {
+        1: {
+            "peso": 9,
+            "msg": "📉 **Pró-labore Irregular:** Sem valor fixo, não há separação financeira real."
+        }
+    },
+    "p3_q0": {
+        1: {
+            "peso": 9,
+            "msg": "🔗 **Conhecimento Tribal:** Processos não documentados. A qualidade depende de quem executa."
+        }
+    },
+    "p4_q0": {
+        1: {
+            "peso": 8,
+            "msg": "📉 **Vendas por Sorte:** Sem Funil visual, a receita futura é imprevisível."
+        }
+    },
+    "p5_q1": {
+        1: {
+            "peso": 8,
+            "msg": "❌ **Contratação de Risco:** Seleção baseada em urgência, sem fit cultural ou teste de perfil."
+        }
+    },
+    "p6_q2": {
+        1: {
+            "peso": 10,
+            "msg": "⚖️ **Risco Trabalhista:** Informalidade na contratação pode gerar multas explosivas."
+        }
+    },
+    "p7_q3": {
+        1: {
+            "peso": 10,
+            "msg": "💾 **Perda de Dados:** Sem backup automático na nuvem (3-2-1), risco de perda catastrófica."
+        }
+    }
 }
 
-IMPLICACOES_FATUAIS = {
+# ============================================================================
+# BASE DE CONHECIMENTO - MATRIZ DE RISCOS 360º
+# ============================================================================
+
+RISK_MATRIX = {
     "Estratégia e Direção": {
-        "impl": "Miopia Estratégica: confunde movimento operacional com progresso real.",
-        "risco_fatal": "73% de estagnação e perda de relevância.",
+        "impl": "A empresa reage ao mercado em vez de ditá-lo. A ausência de 'Norte Verdadeiro' gera a **Miopia Estratégica**, confundindo movimento operacional com progresso real.",
+        "risco_fatal": "Atingir 73% de estagnação (dado de 2024) e perda de relevância, pois 47% das PMEs negligenciam o longo prazo.",
         "causas_raiz": [
-            "Negligência do planejamento de médio/longo prazo (47%).",
-            "Confusão entre movimento operacional e progresso estratégico.",
+            "Negligência do planejamento de médio e longo prazo (47% das lideranças).",
+            "Confundir movimento operacional diário com progresso estratégico real.",
             "Aversão à inovação gerada pela complacência."
         ],
         "acao": "Implementação de OKRs Trimestrais",
@@ -178,496 +174,351 @@ IMPLICACOES_FATUAIS = {
         "res": "Foco laser nas prioridades"
     },
     "Gestão Financeira": {
-        "impl": "Paradoxo da Vulnerabilidade: faturamento robusto corroído por má gestão.",
-        "risco_fatal": "29% encerram antes de 5 anos por incapacidade de gerar lucro sustentável.",
+        "impl": "O **Paradoxo da Vulnerabilidade** é real: o faturamento robusto (crescimento de 4,5% em 2024) é corroído pela má gestão interna. Isso leva à falência prematura.",
+        "risco_fatal": "Fechamento precoce da empresa (29% das PMEs encerram antes de 5 anos) por incapacidade de converter receita em lucro líquido sustentável.",
         "causas_raiz": [
-            "Mistura patrimonial (PF/PJ).",
-            "Incapacidade de gerenciar lucro retido.",
-            "Custo Brasil (20% PIB) + má gestão tributária."
+            "Mistura patrimonial (Caixa da Empresa vs Pessoal).",
+            "Incapacidade de gerenciar o lucro retido e reinvestir estrategicamente.",
+            "O Custo Brasil (20% do PIB) comprime o fluxo de caixa, exacerbado pela má gestão tributária."
         ],
-        "acao": "Segregação Patrimonial e Fluxo de Caixa",
-        "obj": "Blindar o caixa",
-        "res": "Clareza do lucro líquido"
+        "acao": "Segregação Patrimonial e Controle de Fluxo",
+        "obj": "Blindar o caixa da empresa",
+        "res": "Clareza real do lucro líquido"
     },
     "Operação e Processos": {
-        "impl": "Ineficiência Operacional: dono como gargalo eleva custos.",
-        "risco_fatal": "Custo Brasil de R$ 1,7 tri/ano + desequilíbrio de caixa.",
+        "impl": "A **Ineficiência Operacional** e logística (Custo Brasil) transformam o dono no gargalo. Isso eleva os custos e desvia recursos gerenciais valiosos.",
+        "risco_fatal": "Aumento significativo do Custo Brasil interno (R$ 1,7 trilhão/ano) e desequilíbrio do fluxo de caixa por compras impulsivas e má gestão de estoques.",
         "causas_raiz": [
-            "Conhecimento tribal sem POPs.",
-            "Compras impulsivas desequilibram fluxo.",
-            "Burocracia e custos logísticos elevados."
+            "Conhecimento tribal: processos na cabeça, sem Padrões Operacionais (POPs) documentados.",
+            "Compras impulsivas motivadas por promoções, desequilibrando o fluxo de caixa.",
+            "Burocracia interna e custos logísticos elevados, característicos do Custo Brasil."
         ],
-        "acao": "Mapeamento de Processo Crítico (POP)",
-        "obj": "Retirar dono da operação",
-        "res": "Autonomia e padrão"
+        "acao": "Mapeamento do Processo Crítico (POP)",
+        "obj": "Retirar o dono da operação",
+        "res": "Autonomia da equipe e padrão"
     },
     "Vendas e Receita": {
-        "impl": "Vendas por sorte/indicação: sem previsibilidade.",
-        "risco_fatal": "73% estagnação + incapacidade de financiar expansão.",
+        "impl": "Vendas por 'sorte' ou indicação. A falta de previsibilidade de receita impede investimentos seguros e compromete a performance, sendo um sintoma de **Complacência**.",
+        "risco_fatal": "Estagnação (73% de prevalência) e incapacidade de financiar a expansão em um mercado dinâmico.",
         "causas_raiz": [
-            "Ausência de Funil estruturado.",
-            "Foco em sobrevivência diária.",
-            "Aversão ao risco comercial."
+            "Ausência de Funil de Vendas estruturado (planilhas ou informalidade).",
+            "Foco excessivo na sobrevivência operacional diária, negligenciando a prospecção contínua.",
+            "Fidelidade de clientes consolidada gera aversão ao risco e inovação."
         ],
-        "acao": "Estruturação de Funil e CRM",
+        "acao": "Estruturação do Funil de Vendas e CRM",
         "obj": "Gestão visual do pipeline",
-        "res": "Previsibilidade de vendas"
+        "res": "Previsibilidade de fechamentos"
     },
     "Pessoas e Gestão de Talentos": {
-        "impl": "Alta Rotatividade: incapacidade de atrair/reter talentos.",
-        "risco_fatal": "60% não têm equipes qualificadas para transformação digital.",
+        "impl": "Baixa performance crônica. A **Alta Rotatividade** de funcionários-chave é uma manifestação da incapacidade da PME de fornecer uma **Proposta de Valor atrativa** ao empregado.",
+        "risco_fatal": "Perda de talentos e incapacidade de lidar com a **Transformação Digital** (60% das PMEs não possuem equipes qualificadas).",
         "causas_raiz": [
-            "Contratação por feeling/urgência.",
-            "Ausência de rituais 1:1.",
-            "Cultura estática que desmotiva."
+            "Contratação baseada apenas em 'feeling' ou urgência.",
+            "Ausência de rituais de feedback (1:1) e avaliação formal.",
+            "Cultura estática que desmotiva colaboradores, levando à saída para concorrentes mais ágeis."
         ],
-        "acao": "Descritivos de Cargo + Rituais 1:1",
+        "acao": "Criar Descritivos de Cargos e Rituais 1:1",
         "obj": "Alinhamento de expectativas",
         "res": "Retenção e engajamento"
     },
     "Jurídico e Conformidade": {
-        "impl": "Vulnerabilidade Legal: ameaça existencial ao patrimônio.",
-        "risco_fatal": "Passivos trabalhistas + ausência de governança.",
+        "impl": "Vulnerabilidade Legal e Passivos. O risco de litígio é uma ameaça existencial que pode destruir anos de lucro em semanas, comprometendo a **Blindagem** e o **Legado**.",
+        "risco_fatal": "Risco Sistêmico da Sucessão (ausência de Holding e Acordo de Quotistas) e passivos trabalhistas explosivos (Pejotização fraudulenta).",
         "causas_raiz": [
-            "Pejotização fraudulenta.",
-            "Contratos não revisados.",
-            "Ausência de planejamento sucessório."
+            "Informalidade nas contratações (Pejotização fraudulenta e risco subsidiário na Terceirização).",
+            "Contratos com clientes e fornecedores não revisados juridicamente.",
+            "Ausência de planejamento sucessório e Governança Corporativa."
         ],
-        "acao": "Audit de Contratos + CLT",
+        "acao": "Audit de Contratos Críticos e CLT",
         "obj": "Mapear riscos explosivos",
-        "res": "Segurança jurídica"
+        "res": "Segurança jurídica e blindagem"
     },
     "Tecnologia e Dados": {
-        "impl": "Ameaça Cibernética: 73% das PMEs já foram atacadas.",
-        "risco_fatal": "Prejuízos de R$ 100k a R$ 6M por ataque.",
+        "impl": "A **Ameaça Cibernética** é existencial. 73% das PMEs brasileiras já foram vítimas de ataques, com prejuízos entre R$ 100 mil e R$ 6 milhões.",
+        "risco_fatal": "Perda total de dados, interrupção operacional e falência por ataque cibernético (Ransomware é 67% das ameaças).",
         "causas_raiz": [
-            "Poucos recursos para segurança (78%).",
-            "Sistemas desatualizados (71%).",
-            "Falta de backup adequado (54%)."
+            "Poucos recursos dedicados à segurança (78% vulneráveis).",
+            "Sistemas desatualizados (71%) e falta de Backup adequado (54%).",
+            "Erro humano não mitigado por treinamento e autenticação multifator."
         ],
-        "acao": "SSOT + Backup 3-2-1",
+        "acao": "Implementar SSOT (Sistema Único) e Backup 3-2-1",
         "obj": "Eliminar silos de dados",
         "res": "Blindagem contra ataques"
     }
 }
 
-MACRO_PILARES = {
-    "Estratégia e Direção": {"persona": "estrategista", "stop_doing": "Decidir por intuição."},
-    "Gestão Financeira": {"persona": "guardia", "stop_doing": "Misturar contas PF/PJ."},
-    "Operação e Processos": {"persona": "hacker", "stop_doing": "Centralizar tarefas."},
-    "Vendas e Receita": {"persona": "estrategista", "stop_doing": "Esperar o cliente."},
-    "Pessoas e Gestão de Talentos": {"persona": "guardia", "stop_doing": "Feedback só no erro."},
-    "Jurídico e Conformidade": {"persona": "guardia", "stop_doing": "Acordos verbais."},
-    "Tecnologia e Dados": {"persona": "hacker", "stop_doing": "Confiar em papel."}
+# ============================================================================
+# BASE DE CONHECIMENTO - MACRO PILARES
+# ============================================================================
+
+MACRO_PILLARS = {
+    "Estratégia e Direção": {
+        "dor": "Falta de Rumo e Visão.",
+        "acao": "Definir OKRs Trimestrais.",
+        "stop_doing": "Decidir apenas por intuição.",
+        "persona": "estrategista"
+    },
+    "Gestão Financeira": {
+        "dor": "Risco de Ruína e Descontrolo de Caixa.",
+        "acao": "Segregação Patrimonial e Fluxo de Caixa.",
+        "stop_doing": "Misturar contas PF/PJ.",
+        "persona": "guardia"
+    },
+    "Operação e Processos": {
+        "dor": "Ineficiência e Dependência do Dono.",
+        "acao": "Mapear Processos Críticos (POP).",
+        "stop_doing": "Centralizar tarefas delegáveis.",
+        "persona": "hacker"
+    },
+    "Vendas e Receita": {
+        "dor": "Receita Imprevisível.",
+        "acao": "Estruturar Funil de Vendas e CRM.",
+        "stop_doing": "Esperar que o cliente venha até si.",
+        "persona": "estrategista"
+    },
+    "Pessoas e Gestão de Talentos": {
+        "dor": "Equipa Desengajada e Alto Turnover.",
+        "acao": "Criar Descritivos de Cargos e Rituais 1:1.",
+        "stop_doing": "Dar feedback apenas na falha.",
+        "persona": "guardia"
+    },
+    "Jurídico e Conformidade": {
+        "dor": "Vulnerabilidade Legal e Passivos.",
+        "acao": "Blindagem Contratual e Registros.",
+        "stop_doing": "Acordos verbais.",
+        "persona": "guardia"
+    },
+    "Tecnologia e Dados": {
+        "dor": "Processos Manuais e Inseguros.",
+        "acao": "SSOT (Sistema Único) e Backup Automatizado.",
+        "stop_doing": "Confiar gestão a papel e memória.",
+        "persona": "hacker"
+    }
 }
 
+# ============================================================================
+# SYSTEM PROMPT PARA IA
+# ============================================================================
+
 SYSTEM_INSTRUCTION = """
-CONSULTOR SÊNIOR THRIVE - INSTRUÇÕES OTIMIZADAS
+VOCÊ É O CONSULTOR SÊNIOR DA THRIVE BUSINESS.
 
-IDENTIDADE:
-- Autoridade técnica baseada em dados (MDMP + Matriz de Riscos 360º)
-- Empatia estratégica sem paternalismo
-- Linguagem sofisticada e premium
-- Orientação a ação concreta
+1. IDENTIDADE E VOZ
+- Autoridade Técnica: Baseie-se no MDMP e nas **Implicações Fatuais** da Matriz de Riscos 360º. Seja assertivo, nunca hipotético.
+- Empatia Estratégica: Zero paternalismo. Postura de parceiro de crescimento.
+- Sofisticação: Linguagem formal, elegante, premium. Sem gírias.
+- Orientação a Ação: Conduza a Ações Táticas Imediatas. Sem perguntas retóricas.
 
-VOCABULÁRIO OBRIGATÓRIO:
-Gargalo Crítico, Alavancagem Estratégica, Diagnóstico Cirúrgico, MDMP, Ações Táticas Imediatas, Sustentabilidade Sistêmica, Blindagem, Risco de Ruína.
+2. VOCABULÁRIO OBRIGATÓRIO
+Use sempre: "Gargalo Crítico", "Alavancagem Estratégica", "Diagnóstico Cirúrgico", "MDMP", "Ações Táticas Imediatas", "Performance e Propósito", "Sustentabilidade Sistêmica", "Blindagem".
 
-PROIBIDO: problema, dificuldade, ajuda, tarefas, melhoria.
+Se Classificação = Sobrevivência, use: "Risco de Ruína" e "Risco Sistêmico".
 
-ESTRUTURA (Markdown):
-# Relatório Consultivo: [Gargalo]
-## MDMP (máx 3 linhas)
-## Gargalo Crítico: [Nome] (Score X.X/10)
-**Classificação:** [Sobrevivência/Organização/Expansão]
-**Implicação:** [Dados fatuais da Matriz 360º]
-### 3 Causas Raiz
-## Plano de Ação (Tabela)
-### Próximos Passos
-> [Frase inspiradora]
-**[Avatar]** - Consultoria Sênior THRIVE
-"""
+3. VOCABULÁRIO PROIBIDO (CRIME CAPITAL USAR)
+NUNCA use: "problema", "problemas", "dificuldade", "ajuda", "ajudar", "tarefas", "melhoria", "coisas para fazer".
 
-# ============================================================================== 
-# MOTOR DE INTELIGÊNCIA (OTIMIZADO)
-# ==============================================================================
-def get_profile_context(respostas: Dict[str, int]) -> dict:
-    """Análise de porte com cache."""
-    tamanho_idx = respostas.get("p0_q0", 1)
-    
-    perfis = {
-        1: {
-            "tamanho": "Micro/Euquipe",
-            "tom_voz": "Próximo e direto.",
-            "nivel_exigencia": "leniente",
-            "mensagem_contexto": "Foco em caixa e vendas. Informalidade é risco."
-        },
-        2: {
-            "tamanho": "Pequena Empresa",
-            "tom_voz": "Profissional e educativo.",
-            "nivel_exigencia": "moderado",
-            "mensagem_contexto": "Zona de crescimento. Profissionalizar é essencial."
-        }
-    }
-    
-    if tamanho_idx >= 3:
-        return {
-            "tamanho": "Média/Grande",
-            "tom_voz": "Formal e analítico.",
-            "nivel_exigencia": "crítico",
-            "mensagem_contexto": "Governança e dados são inegociáveis."
-        }
-    
-    return perfis.get(tamanho_idx, perfis[1])
+4. ESTRUTURA OBRIGATÓRIA DO RELATÓRIO (MARKDOWN):
 
-def analyze_cross_patterns(scores_map: Dict[str, float], perfil: dict) -> List[Dict[str, str]]:
-    """Detecção de padrões sistêmicos."""
-    insights = []
-    
-    fin = scores_map.get("Gestão Financeira", 0.0)
-    pes = scores_map.get("Pessoas e Gestão de Talentos", 0.0)
-    vend = scores_map.get("Vendas e Receita", 0.0)
-    jur = scores_map.get("Jurídico e Conformidade", 0.0)
-    
-    # Padrão 1: Risco sistêmico de porte
-    if perfil["nivel_exigencia"] == "crítico" and any(x <= 4.0 for x in [jur, fin, pes]):
-        insights.append({
-            "perfil": "⚠️ Risco Sistêmico",
-            "analise": f"Porte {perfil['tamanho']} com gestão informal = passivo oculto.",
-            "recomendacao": "Governança e Compliance urgentes."
-        })
-    
-    # Padrão 2: Alto esforço, baixa margem
-    if vend >= 5.0 and fin <= 4.0:
-        insights.append({
-            "perfil": "⚠️ Vender Muito, Lucrar Pouco",
-            "analise": "Esforço comercial alto com margem baixa.",
-            "recomendacao": "Engenharia Financeira na precificação."
-        })
-    
-    return insights
-
-def analyze_data(scores: MDMPScore) -> dict:
-    """Motor principal de análise (otimizado)."""
-    start_time = time.time()
-    
-    data = scores.scores_por_pilar
-    perfil = get_profile_context(scores.respostas or {})
-    
-    # Normalização e ajustes
-    NORM_MAX = 3.0
-    scores_ajustados = data.copy()
-    
-    # Penalidade para empresas grandes com problemas críticos
-    if perfil["nivel_exigencia"] == "crítico":
-        for k in ["Pessoas e Gestão de Talentos", "Operação e Processos", "Jurídico e Conformidade"]:
-            if k in scores_ajustados and scores_ajustados[k] < 2.5:
-                scores_ajustados[k] = max(1.0, scores_ajustados[k] * 0.85)
-    
-    # Conversão 1-3 → 0-10
-    normalized = {k: (v / NORM_MAX) * 10.0 for k, v in scores_ajustados.items()}
-    
-    # Identificação de gargalo e ponto forte
-    gargalo_key = min(normalized, key=normalized.get)
-    forte_key = max(normalized, key=normalized.get)
-    
-    media_1_3 = sum(scores_ajustados.values()) / len(scores_ajustados)
-    media_0_10 = (media_1_3 / NORM_MAX) * 10.0
-    score_gargalo = normalized[gargalo_key]
-    
-    # Classificação
-    classificacao = (
-        "Sobrevivência" if score_gargalo <= 3.9 else
-        "Organização" if score_gargalo <= 6.9 else
-        "Expansão"
-    )
-    
-    # Busca otimizada de metadados
-    macro_info = get_cached_macro_pilar(gargalo_key)
-    persona = get_cached_persona(macro_info["persona"])
-    fatos = IMPLICACOES_FATUAIS.get(gargalo_key, IMPLICACOES_FATUAIS["Estratégia e Direção"])
-    
-    # Insights pontuais
-    insights = []
-    if scores.respostas:
-        for q_id, resp in scores.respostas.items():
-            if q_id in REGRAS_GATILHO and resp == 1:
-                regra = REGRAS_GATILHO[q_id][resp]
-                peso = regra['peso'] + (3 if perfil["nivel_exigencia"] == "crítico" else 0)
-                urgencia = (peso * 2) + (10 - score_gargalo)
-                insights.append({"texto": regra['msg'], "urgencia": urgencia})
-    
-    insights = sorted(insights, key=lambda x: x['urgencia'], reverse=True)[:4]
-    
-    # Análise cruzada
-    analise_cruzada = analyze_cross_patterns(normalized, perfil)
-    texto_cruzado = (
-        "\n### 🧬 Diagnóstico Cruzado\n" + 
-        "\n".join([f"**{i['perfil']}**: {i['analise']}\n👉 {i['recomendacao']}\n" for i in analise_cruzada])
-    ) if analise_cruzada else ""
-    
-    # Link WhatsApp
-    msg_zap = f"Olá, sou {scores.nome_cliente}. Meu gargalo é {gargalo_key}. Quero avançar."
-    link_zap = f"https://wa.me/{WHATSAPP_NUMBER}?text={urllib.parse.quote(msg_zap)}"
-    
-    processing_time = time.time() - start_time
-    
-    return {
-        "gargalo": gargalo_key,
-        "gargalo_display": gargalo_key.title(),
-        "score_gargalo_0_10": score_gargalo,
-        "forte": forte_key,
-        "forte_display": forte_key.title(),
-        "media_0_10": media_0_10,
-        "classificacao": classificacao,
-        "persona_nome": persona["nome"],
-        "persona_papel": persona["papel"],
-        "frase": persona["frase"],
-        "stop_doing": macro_info["stop_doing"],
-        "insights_list": insights,
-        "insights_prioritarios": "\n".join([f"- {i['texto']}" for i in insights]),
-        "texto_cruzado": texto_cruzado,
-        "briefing": f"{perfil['tamanho']} | {classificacao}",
-        "link_zap": link_zap,
-        "perfil_contexto": perfil["mensagem_contexto"],
-        "tom_voz": perfil["tom_voz"],
-        "fatos_gargalo": fatos,
-        "scores_normalizados_0_10": normalized,
-        "tempo_processamento": processing_time
-    }
-
-# ============================================================================== 
-# GERAÇÃO DE RELATÓRIO (COM RETRY E FALLBACK)
-# ==============================================================================
-def generate_fallback_report(analise: dict) -> str:
-    """Sistema especialista determinístico."""
-    kb = analise['fatos_gargalo']
-    causas = "\n".join([f"- {c}" for c in kb['causas_raiz']])
-    if analise.get('insights_prioritarios'):
-        causas = analise['insights_prioritarios'] + "\n" + causas
-    
-    scores_sorted = sorted(analise['scores_normalizados_0_10'].items(), key=lambda x: x[1])
-    segundo_pilar = scores_sorted[1][0] if len(scores_sorted) > 1 else "Consolidação"
-    
-    return f"""# Relatório Consultivo Final: {analise['gargalo_display']}
+# Relatório Consultivo Final: [Nome do Gargalo Crítico]
 
 ## Diagnóstico de Maturidade por Pilares (MDMP)
-Média de maturidade: **{analise['media_0_10']:.1f}/10**. O **Diagnóstico Cirúrgico** identifica **{analise['forte_display']}** como base para **Alavancagem Estratégica**.
+(Breve análise técnica da média e do ponto forte. Máx 3 linhas.)
 
-## O Gargalo Crítico: {analise['gargalo_display']} (Score {analise['score_gargalo_0_10']:.1f}/10)
-**Classificação:** {analise['classificacao']}
+## O Gargalo Crítico: Pilar [Nome] (Score X.X/10)
+**Classificação:** [Sobrevivência / Organização / Expansão]
 
-**Implicação Primária:** {kb['impl']} **Risco Fatal:** {kb['risco_fatal']}
+**Implicação Primária:** (Qual o impacto central na empresa, usando os dados Fatuais?)
 
 ### 3 Principais Causas Raiz
-{causas}
-{analise['texto_cruzado']}
+- [Causa 1 - Sistêmica: Relacionar a um Risco Fatal da Matriz 360º]
+- [Causa 2 - Processual/Gerencial: Usar um Gatilho Pontual da resposta]
+- [Causa 3 - Estratégica/Comportamental: Relacionar ao score baixo]
 
 ## Plano de Ação Imediato (Foco no Gargalo)
+
 | Ação Tática Imediata | Objetivo | Impacto Esperado |
-| :--- | :--- | :--- |
-| **{kb['acao']}** | {kb['obj']} | {kb['res']} |
+| :-- | :-- | :-- |
+| [Ação prática e mensurável p/ 7-15 dias] | [O que resolve?] | [Resultado concreto] |
 
 ### Próximos Passos Estratégicos
-Após blindar o **Gargalo Crítico**, atenção imediata ao pilar **{segundo_pilar.title()}** para continuidade da **Performance e Propósito**.
+(Indicar o 2º pilar mais fraco e a razão estratégica de atacá-lo na sequência).
 
-> "{analise['frase']}"
+> "[Frase elegante, inspiradora, com vocabulário premium, reforçando Performance e Propósito]"
 
-**{analise['persona_nome']}** - Consultoria Sênior THRIVE
+**[Assinatura do Avatar]**
+Consultoria Sênior THRIVE
 """
 
-def call_gemini_with_retry(prompt: str, max_retries: int = GEMINI_MAX_RETRIES) -> tuple:
-    """Chamada à API Gemini com retry automático."""
-    for attempt in range(max_retries):
-        try:
-            payload = {
-                "contents": [{"parts": [{"text": prompt}]}],
-                "systemInstruction": {"parts": [{"text": SYSTEM_INSTRUCTION}]},
-                "generationConfig": {"temperature": 0.4, "maxOutputTokens": 1500}
-            }
-            
-            response = requests.post(
-                f"{GEMINI_API_URL}?key={GEMINI_API_KEY}",
-                headers={'Content-Type': 'application/json'},
-                json=payload,
-                timeout=GEMINI_TIMEOUT
-            )
-            
-            if response.status_code == 200:
-                data = response.json()
-                if 'candidates' in data and data['candidates']:
-                    return data['candidates'][0]['content']['parts'][0]['text'], "IA Consultiva"
-            
-            logger.warning(f"Gemini tentativa {attempt + 1} falhou: {response.status_code}")
-            
-            if attempt < max_retries - 1:
-                time.sleep(2 ** attempt)  # Exponential backoff
-                
-        except requests.Timeout:
-            logger.error(f"Timeout na tentativa {attempt + 1}")
-            if attempt < max_retries - 1:
-                time.sleep(2 ** attempt)
-        except Exception as e:
-            logger.error(f"Erro na tentativa {attempt + 1}: {e}")
-            break
-    
-    return None, "Modo Especialista (Falha API)"
+# ============================================================================
+# MOTOR DE ANÁLISE - CLASSE PRINCIPAL
+# ============================================================================
 
-def generate_report(analise: dict, cliente_nome: str) -> tuple:
-    """Geração de relatório com fallback robusto."""
-    fallback_text = generate_fallback_report(analise)
+class MaturityAnalyzer:
+    """Motor de inteligência para análise de maturidade empresarial"""
     
-    if not GEMINI_API_KEY:
-        return fallback_text, "Modo Especialista (Offline)"
+    NORMALIZATION_MAX = 3.0
     
-    fatos = analise['fatos_gargalo']
-    prompt = f"""Cliente: {cliente_nome} | {analise['briefing']}
-
-DADOS ESTRATÉGICOS:
-- Gargalo: {analise['gargalo_display']} ({analise['classificacao']})
-- Score: {analise['score_gargalo_0_10']:.1f}/10
-- Implicação: {fatos['impl']} Risco: {fatos['risco_fatal']}
-- Ação Principal: {fatos['acao']}
-
-INSIGHTS:
-{analise['insights_prioritarios']}
-{analise['texto_cruzado']}
-
-Tom: {analise['tom_voz']}
-Gere relatório seguindo estrutura obrigatória."""
-    
-    try:
-        logger.info(f"Gerando relatório IA para {cliente_nome}")
-        texto, modo = call_gemini_with_retry(prompt)
+    def __init__(self, request: DiagnosisRequest):
+        self.request = request
+        self.profile = self._get_company_profile()
+        self.scores_adjusted = self._apply_penalties()
+        self.scores_normalized = self._normalize_scores()
         
-        if texto:
-            return texto, modo
-        else:
-            return fallback_text, "Modo Especialista (Retry Esgotado)"
-            
-    except Exception as e:
-        logger.error(f"Erro fatal na geração: {e}")
-        return fallback_text, "Modo Especialista (Erro)"
-
-# ============================================================================== 
-# ENVIO DE EMAIL (OTIMIZADO)
-# ==============================================================================
-def send_email_resend(scores: MDMPScore, analysis: dict, report: str, modo: str):
-    """Envio de email com tratamento robusto de erros."""
-    if not RESEND_API_KEY:
-        logger.info("Email não enviado: RESEND_API_KEY não configurada")
-        return
-    
-    try:
-        to_email = CONSULTANT_EMAIL or "thrivebusinessconsultoria@gmail.com"
-        subject = f"DIAGNÓSTICO: {scores.nome_cliente.upper()} | {analysis['classificacao']}"
+    def _get_company_profile(self) -> dict:
+        """Camada 1: Interpretação Contextual e Ponderação de Risco"""
+        company_size = self.request.respostas.get("p0_q0", 1)
         
-        html_content = report.replace('\n', '<br>').replace('**', '<b>').replace('# ', '<h2>').replace('## ', '<h3>')
-        cta_button = f'<a href="{analysis["link_zap"]}" style="background:#ddcea4;color:#53534a;padding:10px 20px;text-decoration:none;font-weight:bold;border-radius:5px;margin-top:15px;display:inline-block">AGENDAR SESSÃO</a>'
-        
-        body_html = f"""<html><body style="font-family:sans-serif;max-width:600px;margin:0 auto">
-        <h2>Novo Lead ({modo})</h2>
-        <p><strong>Cliente:</strong> {scores.nome_cliente} ({scores.email_cliente})</p>
-        <p><strong>Briefing:</strong> {analysis['briefing']}</p>
-        <hr>
-        <div style="background:#f9f9f9;padding:15px;border:1px solid #ddd">
-            {html_content}<br><br>{cta_button}
-        </div>
-        </body></html>"""
-        
-        response = requests.post(
-            RESEND_API_URL,
-            json={
-                "from": "Thrive <onboarding@resend.dev>",
-                "to": [to_email, scores.email_cliente],
-                "subject": subject,
-                "html": body_html
+        profiles = {
+            1: {
+                "tamanho": "Micro/Euquipe",
+                "tom_voz": "Próximo e direto. Linguagem simples (não use siglas).",
+                "nivel_exigencia": "leniente",
+                "mensagem_contexto": "Para microempresas, a sobrevivência depende de caixa e vendas. A informalidade é esperada, mas arriscada."
             },
-            headers={"Authorization": f"Bearer {RESEND_API_KEY}"},
-            timeout=10
-        )
-        
-        if response.status_code == 200:
-            logger.info(f"Email enviado com sucesso para {to_email}")
-        else:
-            logger.warning(f"Falha no envio: {response.status_code}")
-            
-    except Exception as e:
-        logger.error(f"Erro no envio de email: {e}")
-
-# ============================================================================== 
-# ROTAS DA API (OTIMIZADAS)
-# ==============================================================================
-@app.get("/")
-def root():
-    """Página inicial com informações da API."""
-    return {
-        "service": "THRIVE Business Intelligence API",
-        "version": "2.0.0",
-        "status": "online",
-        "endpoints": {
-            "health": "/api/health",
-            "diagnostico": "/diagnostico (POST)",
-            "docs": "/docs"
+            2: {
+                "tamanho": "Pequena Empresa",
+                "tom_voz": "Profissional, direto e educativo. Foco em processos.",
+                "nivel_exigencia": "moderado",
+                "mensagem_contexto": "Você está na zona de crescimento. A informalidade que funcionava antes agora é o seu maior risco."
+            }
         }
-    }
-
-@app.get("/api/health")
-def health():
-    """Health check detalhado."""
-    return {
-        "status": "ok",
-        "timestamp": datetime.utcnow().isoformat(),
-        "services": {
-            "gemini": "available" if GEMINI_API_KEY else "unavailable",
-            "resend": "available" if RESEND_API_KEY else "unavailable"
+        
+        # Default para empresas médias/grandes (3+)
+        if company_size >= 3:
+            return {
+                "tamanho": "Média/Grande",
+                "tom_voz": "Formal, estruturado e analítico. Use termos executivos e KPIs.",
+                "nivel_exigencia": "crítico",
+                "mensagem_contexto": "Para o seu porte, a falta de governança e dados é um risco inaceitável. O foco é Governança e Cultura."
+            }
+        
+        return profiles.get(company_size, profiles[1])
+    
+    def _apply_penalties(self) -> Dict[str, float]:
+        """Aplica penalidades baseadas no porte da empresa"""
+        scores = self.request.scores_por_pilar.copy()
+        
+        if self.profile["nivel_exigencia"] == "crítico":
+            critical_pillars = ["Pessoas e Gestão de Talentos", "Operação e Processos", "Jurídico e Conformidade"]
+            for pillar in critical_pillars:
+                if pillar in scores and scores[pillar] < 2.5:
+                    scores[pillar] = max(1.0, scores[pillar] * 0.85)
+        
+        return scores
+    
+    def _normalize_scores(self) -> Dict[str, float]:
+        """Normaliza scores de 1.0-3.0 para 0-10"""
+        return {
+            pillar: (score / self.NORMALIZATION_MAX) * 10.0
+            for pillar, score in self.scores_adjusted.items()
         }
-    }
-
-@app.post("/diagnostico", response_model=ConsultiveReport)
-async def diagnose(scores: MDMPScore, request: Request):
-    """Endpoint principal de diagnóstico (otimizado)."""
-    start_time = time.time()
-    client_ip = request.client.host
     
-    logger.info(f"Nova requisição de {client_ip}: {scores.nome_cliente}")
-    
-    try:
-        # Análise de dados
-        analise = analyze_data(scores)
+    def get_statistics(self) -> dict:
+        """Calcula estatísticas principais"""
+        bottleneck = min(self.scores_normalized, key=self.scores_normalized.get)
+        strength = max(self.scores_normalized, key=self.scores_normalized.get)
         
-        # Geração de relatório
-        relatorio, modo = generate_report(analise, scores.nome_cliente)
+        avg_1_3 = sum(self.scores_adjusted.values()) / len(self.scores_adjusted)
+        avg_0_10 = (avg_1_3 / self.NORMALIZATION_MAX) * 10.0
         
-        # Envio de email (assíncrono para não bloquear resposta)
-        send_email_resend(scores, analise, relatorio, modo)
-        
-        total_time = time.time() - start_time
-        
-        logger.info(f"Diagnóstico concluído em {total_time:.2f}s ({modo})")
+        bottleneck_score = self.scores_normalized[bottleneck]
+        classification = self._classify_score(bottleneck_score)
         
         return {
-            "status": modo,
-            "gargalo_critico": analise['gargalo_display'],
-            "ponto_forte": analise['forte_display'],
-            "analise_ia": relatorio,
-            "score_normalizado": round(analise['score_gargalo_0_10'], 2),
-            "classificacao": analise['classificacao'],
-            "tempo_processamento": round(total_time, 2)
+            "gargalo": bottleneck,
+            "forte": strength,
+            "media_0_10": avg_0_10,
+            "score_gargalo_0_10": bottleneck_score,
+            "classificacao": classification
         }
+    
+    @staticmethod
+    def _classify_score(score: float) -> str:
+        """Classifica o score em níveis de maturidade"""
+        if score <= 3.9:
+            return "Sobrevivência"
+        elif score <= 6.9:
+            return "Organização"
+        return "Expansão"
+    
+    def extract_critical_insights(self) -> List[dict]:
+        """Camada 2: Extrai gatilhos críticos das respostas"""
+        insights = []
+        bottleneck_score = self.get_statistics()["score_gargalo_0_10"]
         
-    except ValueError as e:
-        logger.warning(f"Validação falhou: {e}")
-        raise HTTPException(status_code=422, detail=str(e))
-    except Exception as e:
-        logger.error(f"Erro no diagnóstico: {e}")
-        raise HTTPException(status_code=500, detail="Erro interno no processamento")
-
-# ============================================================================== 
-# EXECUÇÃO
-# ==============================================================================
-if __name__ == "__main__":
-    import uvicorn
-    port = int(os.environ.get("PORT", 8000))
-    logger.info(f"Iniciando servidor na porta {port}")
-    uvicorn.run(app, host="0.0.0.0", port=port)
+        for question_id, answer in self.request.respostas.items():
+            if question_id in CRITICAL_TRIGGERS and answer == 1:
+                trigger = CRITICAL_TRIGGERS[question_id][answer]
+                weight = trigger["peso"]
+                
+                # Aumenta peso para empresas grandes
+                if self.profile["nivel_exigencia"] == "crítico":
+                    weight += 3
+                
+                urgency = (weight * 2) + (10 - bottleneck_score)
+                insights.append({
+                    "texto": trigger["msg"],
+                    "urgencia": urgency
+                })
+        
+        # Retorna os 4 mais urgentes
+        return sorted(insights, key=lambda x: x["urgencia"], reverse=True)[:4]
+    
+    def analyze_cross_patterns(self) -> List[dict]:
+        """Camada 2: Análise de padrões cruzados entre pilares"""
+        patterns = []
+        
+        fin = self.scores_normalized.get("Gestão Financeira", 0.0)
+        people = self.scores_normalized.get("Pessoas e Gestão de Talentos", 0.0)
+        sales = self.scores_normalized.get("Vendas e Receita", 0.0)
+        legal = self.scores_normalized.get("Jurídico e Conformidade", 0.0)
+        
+        # Padrão 1: Risco Sistêmico em empresas grandes
+        if self.profile["nivel_exigencia"] == "crítico" and (legal <= 4.0 or fin <= 4.0 or people <= 4.0):
+            patterns.append({
+                "perfil": "⚠️ Risco Sistêmico no Porte",
+                "analise": f"Sua organização tem porte de corporação ({self.profile['tamanho']}), mas gestão de startup. Isso gera **passivo oculto insustentável** (Ref. Seção IV.1 da Matriz 360º).",
+                "risco": "Implosão por falta de compliance.",
+                "recomendacao": "Reestruturação de Governança e Compliance Imediato."
+            })
+        
+        # Padrão 2: Vender muito, lucrar pouco
+        if sales >= 5.0 and fin <= 4.0:
+            patterns.append({
+                "perfil": "⚠️ Vender muito, Lucrar pouco",
+                "analise": "O esforço comercial é alto, mas a margem é baixa. O problema provável é a **precificação ou custos** (Ref. Paradoxo da Vulnerabilidade: crescimento oco).",
+                "risco": "Quebrar por overtrading (vender mais e perder mais rápido).",
+                "recomendacao": "Engenharia Financeira para analisar Margem de Contribuição."
+            })
+        
+        return patterns
+    
+    def generate_analysis(self) -> dict:
+        """Gera análise completa consolidada"""
+        stats = self.get_statistics()
+        bottleneck = stats["gargalo"]
+        
+        # Mapeia persona e dados do pilar
+        macro_info = MACRO_PILLARS.get(bottleneck, MACRO_PILLARS["Estratégia e Direção"])
+        persona = PERSONAS[macro_info["persona"]]
+        risk_data = RISK_MATRIX.get(bottleneck, RISK_MATRIX["Estratégia e Direção"])
+        
+        # Extrai insights
+        critical_insights = self.extract_critical_insights()
+        cross_patterns = self.analyze_cross_patterns()
+        
+        # Monta texto cruzado
+        cross_text = ""
+        if cross_patterns:
+            cross_text = "\n### 🧬 Diagnóstico Cruzado (Causa Raiz)\n" + "\n".join([
+                f"**{p['perfil']}**\n{p['analise']}\n👉 **Ação:** {p['recomendacao']}\n"
+                for p in cross_patterns
+            ])
+        
+        briefing = f"PORTE: {self.profile['tamanho']}"
+        if cross_patterns:
+            briefing += " | " + " | ".join([f"[{p['perfil']}]" for p in cross_patterns])
+        
+        # Gera link WhatsApp
+        whatsapp_msg = f"Olá, sou {self.request.nome_cliente} ({self.profile['tamanho']}). Meu gargalo é {bottleneck} ({stats['classificacao']}). Quero avançar."
+        whatsapp_link = f"https://wa.me/{Config.WHATSAPP_NUMBER}?text={urllib.parse.quote(whatsapp_msg)}"
