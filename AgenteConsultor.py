@@ -59,14 +59,18 @@ app.add_middleware(
 # -------------------------
 # Pydantic models
 # -------------------------
+# ... existing code ...
 class DiagnosisRequest(BaseModel):
     nome_cliente: str = Field(..., min_length=2, max_length=200)
-email_cliente: str = Field(..., pattern=r'^[\w\.-]+@[\w\.-]+\.\w+$')    telefone_cliente: Optional[str] = Field(None, max_length=30)
+    email_cliente: str = Field(..., pattern=r'^[\w\.-]+@[\w\.-]+\.\w+$')
+    telefone_cliente: Optional[str] = Field(None, max_length=30)
     scores_por_pilar: Dict[str, float] = Field(..., description="Scores na escala 1.0-3.0")
     total_avg: float = Field(..., ge=1.0, le=3.0)
     respostas: Dict[str, int] = Field(default_factory=dict)
 
-
+class DiagnosisResponse(BaseModel):
+    telefone_cliente: Optional[str] = Field(None, max_length=30)
+# ... existing code ...
 class DiagnosisResponse(BaseModel):
     status: str
     gargalo_critico: str
