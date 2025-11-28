@@ -279,20 +279,16 @@ def _send_email_sync(analyzer: MaturityAnalyzer, report: str):
         logger.debug("Resend não configurado; a saltar envio de email.")
         return
 
-    html_content = report.replace('\n', '<br>').replace('**', '<b>').replace('##', '<h3>')
-
+html_content = report.replace('\n', '<br>').replace('**', '<b>').replace('##', '<h3>')
     payload = {
-        "from": "THRIVE Business <onboarding@resend.dev>",
-        "reply_to": Config.CONSULTANT_EMAIL,
+        "from": "THRIVE Business <onboarding@resend.dev>",  # Obrigatório ser este email no plano grátis
+        "reply_to": Config.CONSULTANT_EMAIL,                # As respostas vão para o seu Gmail
         "to": [analyzer.payload.email_cliente, Config.CONSULTANT_EMAIL],
         "subject": f"📊 Novo Diagnóstico: {analyzer.payload.nome_cliente}",
         "html": f"<h2>Diagnóstico de Maturidade</h2><p>Cliente: {analyzer.payload.nome_cliente}</p><hr>{html_content}"
     }
     try:
-        resp = requests.post(Config.RESEND_API_URL, json=payload,
-                             headers={"Authorization": f"Bearer {Config.RESEND_API_KEY}",
-                                      "Content-Type": "application/json"},
-                             timeout=10)
+        resp = requests.post(Config.RESEND_API_URL, json=payload, headers={"Authorization": f"Bearer {Config.RESEND_API_KEY}", "Content-Type": "application/json"},timeout=10)
         if resp.ok:
             logger.info("Email enviado com sucesso.")
         else:
@@ -353,3 +349,4 @@ if __name__ == "__main__":
 
 
     uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
+
