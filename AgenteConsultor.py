@@ -37,8 +37,8 @@ class Config:
     WHATSAPP_NUMBER: str = os.getenv("WHATSAPP_NUMBER", "5524992778145")
 
     # Endpoint da API Gemini
-GEMINI_API_URL: str = os.getenv("GEMINI_API_URL", "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent")
-RESEND_API_URL: str = os.getenv("RESEND_API_URL", "https://api.resend.com/emails")
+    GEMINI_API_URL: str = os.getenv("GEMINI_API_URL", "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent")
+    RESEND_API_URL: str = os.getenv("RESEND_API_URL", "https://api.resend.com/emails")
 
 
 if not Config.RESEND_API_KEY:
@@ -279,22 +279,29 @@ def _send_email_sync(analyzer: MaturityAnalyzer, report: str):
         logger.debug("Resend não configurado; a saltar envio de email.")
         return
 
-html_content = report.replace('\n', '<br>').replace('**', '<b>').replace('##', '<h3>')
+    html_content = report.replace('\n', '<br>').replace('**', '<b>').replace('##', '<h3>')
+    
+    # CORREÇÃO CRÍTICA: 'from' deve ser o domínio do Resend se não tiver domínio próprio
     payload = {
-        "from": "THRIVE Business <onboarding@resend.dev>",  # Obrigatório ser este email no plano grátis
-        "reply_to": Config.CONSULTANT_EMAIL,                # As respostas vão para o seu Gmail
+        "from": "THRIVE Business <onboarding@resend.dev>",
+        "reply_to": Config.CONSULTANT_EMAIL,
         "to": [analyzer.payload.email_cliente, Config.CONSULTANT_EMAIL],
         "subject": f"📊 Novo Diagnóstico: {analyzer.payload.nome_cliente}",
         "html": f"<h2>Diagnóstico de Maturidade</h2><p>Cliente: {analyzer.payload.nome_cliente}</p><hr>{html_content}"
     }
+    
     try:
-        resp = requests.post(Config.RESEND_API_URL, json=payload, headers={"Authorization": f"Bearer {Config.RESEND_API_KEY}", "Content-Type": "application/json"},timeout=10)
+        # AQUI USAMOS Config.RESEND_API_URL corretamente
+        resp = requests.post(Config.RESEND_API_URL, json=payload,
+                             headers={"Authorization": f"Bearer {Config.RESEND_API_KEY}", "Content-Type": "application/json"},
+                             timeout=15)
         if resp.ok:
-            logger.info("Email enviado com sucesso.")
+            logger.info(f"Email enviado com sucesso para {analyzer.payload.email_cliente}")
         else:
+            # Log detalhado do erro
             logger.error(f"Resend failed: {resp.status_code} - {resp.text}")
     except Exception as e:
-        logger.exception("Erro ao enviar email")
+        logger.exception("Exceção ao enviar email")
 
 
 def send_email_notification_async(analyzer: MaturityAnalyzer, report: str):
@@ -347,6 +354,4 @@ def create_diagnosis(payload: DiagnosisRequest):
 if __name__ == "__main__":
     import uvicorn
 
-
     uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
-
