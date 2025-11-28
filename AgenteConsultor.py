@@ -61,11 +61,11 @@ app.add_middleware(
 # -------------------------
 class DiagnosisRequest(BaseModel):
     nome_cliente: str = Field(..., min_length=2, max_length=200)
-    email_cliente: str = Field(..., regex=r'^[\w\.-]+@[\w\.-]+\.\w+$')
-    telefone_cliente: Optional[str] = Field(None, max_length=30)
+email_cliente: str = Field(..., pattern=r'^[\w\.-]+@[\w\.-]+\.\w+$')    telefone_cliente: Optional[str] = Field(None, max_length=30)
     scores_por_pilar: Dict[str, float] = Field(..., description="Scores na escala 1.0-3.0")
     total_avg: float = Field(..., ge=1.0, le=3.0)
     respostas: Dict[str, int] = Field(default_factory=dict)
+
 
 class DiagnosisResponse(BaseModel):
     status: str
@@ -332,3 +332,4 @@ def create_diagnosis(payload: DiagnosisRequest):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
+
