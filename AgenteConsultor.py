@@ -37,9 +37,8 @@ class Config:
     WHATSAPP_NUMBER: str = os.getenv("WHATSAPP_NUMBER", "5524992778145")
 
     # Endpoint da API Gemini
-    GEMINI_API_URL: str = os.getenv("GEMINI_API_URL",
-                                    "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent")
-    RESEND_API_URL: str = os.getenv("RESEND_API_URL", "https://api.resend.com/emails")
+GEMINI_API_URL: str = os.getenv("GEMINI_API_URL", "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent")
+RESEND_API_URL: str = os.getenv("RESEND_API_URL", "https://api.resend.com/emails")
 
 
 if not Config.RESEND_API_KEY:
@@ -67,7 +66,6 @@ app.add_middleware(
 # -------------------------
 class DiagnosisRequest(BaseModel):
     nome_cliente: str = Field(..., min_length=2, max_length=200)
-    # CORREÇÃO CRÍTICA: pattern em vez de regex para Pydantic v2
     email_cliente: str = Field(..., pattern=r'^[\w\.-]+@[\w\.-]+\.\w+$')
     telefone_cliente: Optional[str] = Field(None, max_length=30)
     scores_por_pilar: Dict[str, float] = Field(..., description="Scores na escala 1.0-3.0")
@@ -284,7 +282,8 @@ def _send_email_sync(analyzer: MaturityAnalyzer, report: str):
     html_content = report.replace('\n', '<br>').replace('**', '<b>').replace('##', '<h3>')
 
     payload = {
-        "from": f"THRIVE Business <{Config.CONSULTANT_EMAIL}>",
+        "from": "THRIVE Business <onboarding@resend.dev>",
+        "reply_to": Config.CONSULTANT_EMAIL,
         "to": [analyzer.payload.email_cliente, Config.CONSULTANT_EMAIL],
         "subject": f"📊 Novo Diagnóstico: {analyzer.payload.nome_cliente}",
         "html": f"<h2>Diagnóstico de Maturidade</h2><p>Cliente: {analyzer.payload.nome_cliente}</p><hr>{html_content}"
@@ -351,5 +350,6 @@ def create_diagnosis(payload: DiagnosisRequest):
 
 if __name__ == "__main__":
     import uvicorn
+
 
     uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
